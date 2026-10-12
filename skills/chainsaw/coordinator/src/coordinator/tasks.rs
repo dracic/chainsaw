@@ -11,6 +11,7 @@ use anyhow::{Context, Result, bail};
 
 use super::{cmd_prompt, daemon_prompt, record_run_event, session_name, task_session};
 use crate::domain::{RunEventKind, Session, Task, TaskState};
+use crate::infra::git::UNBORN_HEAD;
 use crate::persistence::store::Store;
 use crate::persistence::{run_event, task};
 use crate::run::Run;
@@ -228,10 +229,18 @@ pub(super) fn cmd_dispatch(
 /// The session may have read the tree before its task arrived; name what moved
 /// since it started so it rereads that first. Empty when nothing has.
 fn files_changed_since_launch(run: &Run, session: &Session) -> Result<String> {
-  let Some(head) = session.launched_head() else {
+  let Some(launched) = session.launched_head() else {
     return Ok(String::new());
   };
-  let files = run.repo().files_changed(head, "HEAD")?;
+  let repo = run.repo();
+  let files = if launched != UNBORN_HEAD {
+    repo.files_changed(launched, "HEAD")?
+  } else if repo.head()? != UNBORN_HEAD {
+    // Launched before the first commit: every committed file is new to it.
+    repo.files_at("HEAD")?
+  } else {
+    Vec::new()
+  };
   if files.is_empty() {
     return Ok(String::new());
   }
